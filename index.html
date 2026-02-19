@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0">
+    
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Meu Leitor ✨">
+    
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3532/3532353.png">
+    
+    <title>My Personal Reader ✨</title>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+    <link rel="apple-touch-icon" href="icone.png">
+
+    <style>
+        :root {
+            --primary: #ff85a1; 
+            --secondary: #a78bfa; 
+            --bg: #fff5f7; 
+            --text: #4a4a4a;
+            --container-bg: #ffffff;
+        }
+
+        body { 
+            background: var(--bg); 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
+            color: var(--text); 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            min-height: 100vh; 
+            margin: 0; 
+            overflow: hidden; 
+        }
+
+        .app-container { 
+            width: 88%; 
+            max-width: 380px; 
+            background: var(--container-bg); 
+            padding: 25px; 
+            border-radius: 35px; 
+            box-shadow: 0 15px 35px rgba(255, 133, 161, 0.15); 
+            text-align: center;
+            margin: 20px 0;
+            /* Suporte para o "notch" do iPhone */
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+
+        h3 { font-weight: 600; color: var(--primary); margin: 0 0 15px 0; font-size: 1.3rem; }
+
+        #preview-area { 
+            width: 100%; height: 260px; background: #fdfdfd; 
+            border-radius: 25px; margin-bottom: 20px; overflow: hidden; 
+            border: 6px solid #ffffff;
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.05), 0 5px 15px rgba(0,0,0,0.08);
+            display: flex; align-items: center; justify-content: center;
+        }
+
+        canvas { width: 100%; height: 100%; object-fit: contain; }
+
+        .controls { display: grid; gap: 15px; }
+        .row { display: flex; gap: 10px; }
+
+        label { font-size: 11px; color: #b0b0b0; display: block; margin-bottom: 4px; text-align: left; font-weight: 700; padding-left: 5px; }
+
+        select, input[type="number"] { 
+            background: #f8f9fa; border: 1px solid #eee; color: var(--text); 
+            padding: 12px; border-radius: 15px; width: 100%; outline: none; 
+            font-size: 16px; 
+            appearance: none; -webkit-appearance: none;
+        }
+
+        input[type="range"] { -webkit-appearance: none; width: 100%; height: 8px; background: #f0f0f0; border-radius: 10px; outline: none; margin: 10px 0; }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none; width: 24px; height: 24px; background: var(--primary); 
+            border-radius: 50%; cursor: pointer; border: 3px solid white; box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+        }
+
+        .main-btn { 
+            background: linear-gradient(135deg, var(--primary), var(--secondary)); 
+            color: white; border: none; padding: 18px; border-radius: 20px; 
+            font-size: 16px; font-weight: bold; cursor: pointer; width: 100%; 
+            transition: 0.2s; box-shadow: 0 5px 15px rgba(255, 133, 161, 0.3);
+            -webkit-tap-highlight-color: transparent;
+        }
+        .main-btn:active { transform: scale(0.95); opacity: 0.9; }
+
+        .secondary-btn { 
+            background: #f8f9fa; color: #888; border: 1px solid #eee; 
+            padding: 14px; border-radius: 18px; cursor: pointer; flex: 1; 
+            font-weight: 600; font-size: 13px; -webkit-tap-highlight-color: transparent;
+        }
+        .stop-btn { color: #ff6b6b; border-color: #ffe5e5; }
+        
+        #pdfNameDisplay { font-size: 10px; color: #dbdbdb; margin-top: -10px; margin-bottom: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 10px; }
+    </style>
+</head>
+<body>
+
+<div class="app-container">
+    <h3>My Reading Time ✨</h3>
+    <div id="pdfNameDisplay">Selecione um arquivo</div>
+    
+    <div id="preview-area"><canvas id="pdf-canvas"></canvas></div>
+
+    <div class="controls">
+        <button class="main-btn" id="playBtn" onclick="togglePlay()">▶ COMEÇAR LEITURA</button>
+
+        <div class="row">
+            <div style="flex: 2">
+                <label>VOZ</label>
+                <select id="voiceSelect" onchange="saveCurrentProgress()"></select>
+            </div>
+            <div style="flex: 1">
+                <label>PÁGINA</label>
+                <input type="number" id="pageNumber" value="1" onchange="handlePageChangeManual()">
+            </div>
+        </div>
+
+        <div class="row">
+            <div style="flex: 1">
+                <label>VELOCIDADE: <span id="vVal" style="color: var(--primary); font-weight: bold;">1.2</span>x</label>
+                <input type="range" id="speed" min="0.5" max="3.0" step="0.1" value="1.2" oninput="updateSpeed()">
+            </div>
+        </div>
+
+        <div class="row">
+            <button class="secondary-btn" onclick="document.getElementById('fileIn').click()">📁 ABRIR</button>
+            <button class="secondary-btn stop-btn" onclick="stopAll()">⏹ PARAR</button>
+        </div>
+    </div>
+</div>
+
+<input type="file" id="fileIn" accept="application/pdf" hidden>
+
+<script>
+    const synth = window.speechSynthesis;
+    const canvas = document.getElementById('pdf-canvas');
+    const ctx = canvas.getContext('2d');
+    let pdfDoc = null;
+    let isPlaying = false;
+    let textChunks = [];
+    let currentChunkIndex = 0;
+    let currentFileName = "";
+
+    function getVoices() {
+        const voices = synth.getVoices();
+        const select = document.getElementById('voiceSelect');
+        const currentSelection = select.value;
+        select.innerHTML = voices.filter(v => v.lang.includes('pt') || v.lang.includes('en'))
+            .map((v, i) => `<option value="${i}">${v.name}</option>`).join('');
+        const globalVoice = localStorage.getItem('reader_global_voice');
+        if (globalVoice && !currentSelection) select.value = globalVoice;
+    }
+    synth.onvoiceschanged = getVoices;
+    getVoices();
+
+    function updateSpeed() { 
+        document.getElementById('vVal').innerText = document.getElementById('speed').value; 
+        saveCurrentProgress();
+    }
+
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+    
+    document.getElementById('fileIn').onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        currentFileName = file.name;
+        document.getElementById('pdfNameDisplay').innerText = currentFileName;
+        const data = await file.arrayBuffer();
+        pdfDoc = await pdfjsLib.getDocument({data}).promise;
+        const savedPage = localStorage.getItem('pg_' + currentFileName);
+        document.getElementById('pageNumber').value = savedPage || 1;
+        loadPagePreview();
+    };
+
+    function saveCurrentProgress() {
+        if (currentFileName) {
+            localStorage.setItem('pg_' + currentFileName, document.getElementById('pageNumber').value);
+            localStorage.setItem('reader_global_speed', document.getElementById('speed').value);
+            localStorage.setItem('reader_global_voice', document.getElementById('voiceSelect').value);
+        }
+    }
+
+    async function loadPagePreview() {
+        if(!pdfDoc) return;
+        const pageNum = parseInt(document.getElementById('pageNumber').value);
+        if (pageNum < 1 || pageNum > pdfDoc.numPages) return;
+        const page = await pdfDoc.getPage(pageNum);
+        const viewport = page.getViewport({scale: 1.0});
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+        await page.render({canvasContext: ctx, viewport}).promise;
+    }
+
+    function handlePageChangeManual() {
+        saveCurrentProgress();
+        loadPagePreview();
+    }
+
+    function togglePlay() {
+        if (isPlaying) {
+            if (synth.paused) { synth.resume(); document.getElementById('playBtn').innerText = "⏸ PAUSAR"; }
+            else { synth.pause(); document.getElementById('playBtn').innerText = "▶ RETOMAR"; }
+        } else { startReading(); }
+    }
+
+    async function startReading() {
+        if(!pdfDoc) return;
+        isPlaying = true;
+        document.getElementById('playBtn').innerText = "⏸ PAUSAR";
+        const pageNum = parseInt(document.getElementById('pageNumber').value);
+        saveCurrentProgress();
+        const page = await pdfDoc.getPage(pageNum);
+        const content = await page.getTextContent();
+        const fullPageText = content.items.map(item => item.str).join(" ").replace(/\s+/g, ' ').trim();
+        if (fullPageText.length > 5) {
+            textChunks = fullPageText.match(/[^\.!\?]+[\.!\?]+/g) || [fullPageText];
+            currentChunkIndex = 0;
+            speakNextChunk(pageNum);
+        } else { goToNextPage(pageNum); }
+    }
+
+    function speakNextChunk(pageNum) {
+        if (!isPlaying) return;
+        if (currentChunkIndex >= textChunks.length) { goToNextPage(pageNum); return; }
+        const utterance = new SpeechSynthesisUtterance(textChunks[currentChunkIndex]);
+        const voices = synth.getVoices().filter(v => v.lang.includes('pt') || v.lang.includes('en'));
+        utterance.voice = voices[document.getElementById('voiceSelect').value];
+        utterance.rate = document.getElementById('speed').value;
+        utterance.onend = () => { currentChunkIndex++; speakNextChunk(pageNum); };
+        utterance.onerror = () => { currentChunkIndex++; speakNextChunk(pageNum); };
+        synth.speak(utterance);
+    }
+
+    function goToNextPage(currentNum) {
+        let next = currentNum + 1;
+        if (pdfDoc && next <= pdfDoc.numPages) {
+            document.getElementById('pageNumber').value = next;
+            saveCurrentProgress();
+            loadPagePreview();
+            startReading();
+        } else { stopAll(); }
+    }
+
+    function stopAll() {
+        isPlaying = false;
+        synth.cancel();
+        document.getElementById('playBtn').innerText = "▶ COMEÇAR LEITURA";
+    }
+
+    window.onload = () => {
+        const globalSpeed = localStorage.getItem('reader_global_speed');
+        if (globalSpeed) {
+            document.getElementById('speed').value = globalSpeed;
+            document.getElementById('vVal').innerText = globalSpeed;
+        }
+    }
+</script>
+</body>
+</html>
