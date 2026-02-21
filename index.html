@@ -12,7 +12,7 @@
     <title>My Personal Reader ✨</title>
     
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
-   
+    
 
     <style>
         :root {
@@ -44,7 +44,6 @@
             box-shadow: 0 15px 35px rgba(255, 133, 161, 0.15); 
             text-align: center;
             margin: 20px 0;
-            /* Suporte para o "notch" do iPhone */
             padding-bottom: env(safe-area-inset-bottom);
         }
 
@@ -135,15 +134,53 @@
 
 <input type="file" id="fileIn" accept="application/pdf" hidden>
 
+<audio id="silentAudio" loop>
+    <source src="data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAA==" type="audio/wav">
+</audio>
+
 <script>
     const synth = window.speechSynthesis;
     const canvas = document.getElementById('pdf-canvas');
     const ctx = canvas.getContext('2d');
+    const silentAudio = document.getElementById('silentAudio');
+    
     let pdfDoc = null;
     let isPlaying = false;
     let textChunks = [];
     let currentChunkIndex = 0;
     let currentFileName = "";
+    let wakeLock = null;
+
+    // --- FUNÇÕES DE PREVENÇÃO DE SONO ---
+    
+    async function requestWakeLock() {
+        try {
+            if ('wakeLock' in navigator) {
+                wakeLock = await navigator.wakeLock.request('screen');
+            }
+        } catch (err) {
+            console.log("WakeLock falhou: ", err.message);
+        }
+    }
+
+    function releaseWakeLock() {
+        if (wakeLock !== null) {
+            wakeLock.release();
+            wakeLock = null;
+        }
+    }
+
+    function startKeepAlive() {
+        silentAudio.play().catch(e => console.log("Áudio bloqueado inicialmente"));
+        requestWakeLock();
+    }
+
+    function stopKeepAlive() {
+        silentAudio.pause();
+        releaseWakeLock();
+    }
+
+    // --- LÓGICA DO APP ---
 
     function getVoices() {
         const voices = synth.getVoices();
@@ -202,9 +239,20 @@
 
     function togglePlay() {
         if (isPlaying) {
-            if (synth.paused) { synth.resume(); document.getElementById('playBtn').innerText = "⏸ PAUSAR"; }
-            else { synth.pause(); document.getElementById('playBtn').innerText = "▶ RETOMAR"; }
-        } else { startReading(); }
+            if (synth.paused) { 
+                synth.resume(); 
+                startKeepAlive();
+                document.getElementById('playBtn').innerText = "⏸ PAUSAR"; 
+            }
+            else { 
+                synth.pause(); 
+                stopKeepAlive();
+                document.getElementById('playBtn').innerText = "▶ RETOMAR"; 
+            }
+        } else { 
+            startKeepAlive();
+            startReading(); 
+        }
     }
 
     async function startReading() {
@@ -230,8 +278,21 @@
         const voices = synth.getVoices().filter(v => v.lang.includes('pt') || v.lang.includes('en'));
         utterance.voice = voices[document.getElementById('voiceSelect').value];
         utterance.rate = document.getElementById('speed').value;
-        utterance.onend = () => { currentChunkIndex++; speakNextChunk(pageNum); };
-        utterance.onerror = () => { currentChunkIndex++; speakNextChunk(pageNum); };
+        
+        utterance.onend = () => { 
+            if(isPlaying) {
+                currentChunkIndex++; 
+                speakNextChunk(pageNum); 
+            }
+        };
+        
+        utterance.onerror = () => { 
+            if(isPlaying) {
+                currentChunkIndex++; 
+                speakNextChunk(pageNum); 
+            }
+        };
+        
         synth.speak(utterance);
     }
 
@@ -248,6 +309,7 @@
     function stopAll() {
         isPlaying = false;
         synth.cancel();
+        stopKeepAlive();
         document.getElementById('playBtn').innerText = "▶ COMEÇAR LEITURA";
     }
 
@@ -258,6 +320,13 @@
             document.getElementById('vVal').innerText = globalSpeed;
         }
     }
+    
+    // Se o usuário voltar para a aba, garante que o WakeLock seja reativado se estiver lendo
+    document.addEventListener('visibilitychange', async () => {
+        if (wakeLock !== null && document.visibilityState === 'visible' && isPlaying) {
+            requestWakeLock();
+        }
+    });
 </script>
 </body>
 </html>
