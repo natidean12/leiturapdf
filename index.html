@@ -139,10 +139,9 @@
 </audio>
 
 <script>
-    const synth = window.speechSynthesis;
+const synth = window.speechSynthesis;
     const canvas = document.getElementById('pdf-canvas');
     const ctx = canvas.getContext('2d');
-    const silentAudio = document.getElementById('silentAudio');
     
     let pdfDoc = null;
     let isPlaying = false;
@@ -151,7 +150,11 @@
     let currentFileName = "";
     let wakeLock = null;
 
-    // --- FUNÇÕES DE PREVENÇÃO DE SONO ---
+    // Variáveis para o novo motor de "Keep Alive"
+    let audioCtx = null;
+    let oscillator = null;
+
+    // --- NOVO MOTOR DE PREVENÇÃO DE SONO ---
     async function requestWakeLock() {
         try {
             if ('wakeLock' in navigator) {
@@ -160,35 +163,40 @@
         } catch (err) {}
     }
 
-    function releaseWakeLock() {
-        if (wakeLock !== null) {
-            wakeLock.release();
-            wakeLock = null;
-        }
-    }
-
-    // Melhora o Keep Alive para rodar em segundo plano
     function startKeepAlive() {
-        silentAudio.play().catch(() => {});
         requestWakeLock();
         
-        // Hack extra: Reinicia o áudio mudo a cada 20 segundos para manter o processo vivo
-        if (!window.keepAliveInterval) {
-            window.keepAliveInterval = setInterval(() => {
-                if (isPlaying) {
-                    silentAudio.currentTime = 0;
-                    silentAudio.play().catch(() => {});
-                }
-            }, 20000);
+        // Cria um som constante e inaudível para manter o hardware de som ocupado
+        // Isso é o que impede o sistema de matar o app em segundo plano
+        if (!audioCtx) {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         }
+        
+        if (audioCtx.state === 'suspended') {
+            audioCtx.resume();
+        }
+
+        // Se já houver um oscilador, para ele antes de criar outro
+        if (oscillator) oscillator.stop();
+
+        oscillator = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+        
+        oscillator.type = 'sine';
+        oscillator.frequency.setValueAtTime(1, audioCtx.currentTime); // Frequência ultra baixa (inaudível)
+        gainNode.gain.setValueAtTime(0.001, audioCtx.currentTime); // Volume quase zero
+        
+        oscillator.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+        oscillator.start();
     }
 
     function stopKeepAlive() {
-        silentAudio.pause();
-        releaseWakeLock();
-        if (window.keepAliveInterval) {
-            clearInterval(window.keepAliveInterval);
-            window.keepAliveInterval = null;
+        if (wakeLock) wakeLock.release().then(() => wakeLock = null);
+        if (oscillator) {
+            oscillator.stop();
+            oscillator.disconnect();
+            oscillator = null;
         }
     }
 
@@ -235,7 +243,6 @@
     async function loadPagePreview() {
         if(!pdfDoc) return;
         const pageNum = parseInt(document.getElementById('pageNumber').value);
-        if (pageNum < 1 || pageNum > pdfDoc.numPages) return;
         const page = await pdfDoc.getPage(pageNum);
         const viewport = page.getViewport({scale: 1.0});
         canvas.height = viewport.height;
@@ -275,6 +282,7 @@
         const page = await pdfDoc.getPage(pageNum);
         const content = await page.getTextContent();
         const fullPageText = content.items.map(item => item.str).join(" ").replace(/\s+/g, ' ').trim();
+        
         if (fullPageText.length > 5) {
             textChunks = fullPageText.match(/[^\.!\?]+[\.!\?]+/g) || [fullPageText];
             currentChunkIndex = 0;
@@ -286,7 +294,7 @@
         if (!isPlaying) return;
         if (currentChunkIndex >= textChunks.length) { goToNextPage(pageNum); return; }
         
-        // Cancela qualquer fala residual para evitar travamento em background
+        // Força o cancelamento de qualquer fila pendente para limpar o buffer de voz
         synth.cancel();
 
         const utterance = new SpeechSynthesisUtterance(textChunks[currentChunkIndex]);
@@ -297,13 +305,12 @@
         utterance.onend = () => { 
             if(isPlaying) {
                 currentChunkIndex++; 
-                // Pequeno delay para ajudar o navegador a processar em background
-                setTimeout(() => speakNextChunk(pageNum), 50);
+                // Pequeno delay ajuda a evitar o bloqueio de execução no iOS
+                setTimeout(() => speakNextChunk(pageNum), 100);
             }
         };
         
         utterance.onerror = (e) => { 
-            console.error("Erro na fala:", e);
             if(isPlaying) {
                 currentChunkIndex++; 
                 speakNextChunk(pageNum); 
@@ -330,14 +337,11 @@
         document.getElementById('playBtn').innerText = "▶ COMEÇAR LEITURA";
     }
 
-    // Garante que ao voltar para o app tudo esteja sincronizado
+    // Reativa o motor se o usuário voltar para a aba
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible' && isPlaying) {
             requestWakeLock();
-            // Se a fala parou sozinha no fundo, tenta retomar
-            if (!synth.speaking && !synth.paused) {
-                speakNextChunk(parseInt(document.getElementById('pageNumber').value));
-            }
+            if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
         }
     });
 </script>
