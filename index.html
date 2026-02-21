@@ -152,15 +152,12 @@
     let wakeLock = null;
 
     // --- FUNÇÕES DE PREVENÇÃO DE SONO ---
-    
     async function requestWakeLock() {
         try {
             if ('wakeLock' in navigator) {
                 wakeLock = await navigator.wakeLock.request('screen');
             }
-        } catch (err) {
-            console.log("WakeLock falhou: ", err.message);
-        }
+        } catch (err) {}
     }
 
     function releaseWakeLock() {
@@ -170,18 +167,32 @@
         }
     }
 
+    // Melhora o Keep Alive para rodar em segundo plano
     function startKeepAlive() {
-        silentAudio.play().catch(e => console.log("Áudio bloqueado inicialmente"));
+        silentAudio.play().catch(() => {});
         requestWakeLock();
+        
+        // Hack extra: Reinicia o áudio mudo a cada 20 segundos para manter o processo vivo
+        if (!window.keepAliveInterval) {
+            window.keepAliveInterval = setInterval(() => {
+                if (isPlaying) {
+                    silentAudio.currentTime = 0;
+                    silentAudio.play().catch(() => {});
+                }
+            }, 20000);
+        }
     }
 
     function stopKeepAlive() {
         silentAudio.pause();
         releaseWakeLock();
+        if (window.keepAliveInterval) {
+            clearInterval(window.keepAliveInterval);
+            window.keepAliveInterval = null;
+        }
     }
 
     // --- LÓGICA DO APP ---
-
     function getVoices() {
         const voices = synth.getVoices();
         const select = document.getElementById('voiceSelect');
@@ -274,6 +285,10 @@
     function speakNextChunk(pageNum) {
         if (!isPlaying) return;
         if (currentChunkIndex >= textChunks.length) { goToNextPage(pageNum); return; }
+        
+        // Cancela qualquer fala residual para evitar travamento em background
+        synth.cancel();
+
         const utterance = new SpeechSynthesisUtterance(textChunks[currentChunkIndex]);
         const voices = synth.getVoices().filter(v => v.lang.includes('pt') || v.lang.includes('en'));
         utterance.voice = voices[document.getElementById('voiceSelect').value];
@@ -282,11 +297,13 @@
         utterance.onend = () => { 
             if(isPlaying) {
                 currentChunkIndex++; 
-                speakNextChunk(pageNum); 
+                // Pequeno delay para ajudar o navegador a processar em background
+                setTimeout(() => speakNextChunk(pageNum), 50);
             }
         };
         
-        utterance.onerror = () => { 
+        utterance.onerror = (e) => { 
+            console.error("Erro na fala:", e);
             if(isPlaying) {
                 currentChunkIndex++; 
                 speakNextChunk(pageNum); 
@@ -313,18 +330,14 @@
         document.getElementById('playBtn').innerText = "▶ COMEÇAR LEITURA";
     }
 
-    window.onload = () => {
-        const globalSpeed = localStorage.getItem('reader_global_speed');
-        if (globalSpeed) {
-            document.getElementById('speed').value = globalSpeed;
-            document.getElementById('vVal').innerText = globalSpeed;
-        }
-    }
-    
-    // Se o usuário voltar para a aba, garante que o WakeLock seja reativado se estiver lendo
-    document.addEventListener('visibilitychange', async () => {
-        if (wakeLock !== null && document.visibilityState === 'visible' && isPlaying) {
+    // Garante que ao voltar para o app tudo esteja sincronizado
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && isPlaying) {
             requestWakeLock();
+            // Se a fala parou sozinha no fundo, tenta retomar
+            if (!synth.speaking && !synth.paused) {
+                speakNextChunk(parseInt(document.getElementById('pageNumber').value));
+            }
         }
     });
 </script>
